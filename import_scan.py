@@ -5,16 +5,25 @@ import numpy
 import pandas
 
 
-
-
-def convert_from_polar_to_cartesian(data) -> pandas.DataFrame:
+def convert_from_polar_to_cartesian(data, *, flip_left_right=False) -> pandas.DataFrame:
     data['angle'] = convert_deg_to_rad(data['angle'])
     data['angle'] = set_vertical_to_zero_angle(data['angle'])
 
-    data['x'] = numpy.cos(data['angle']) * data['distance']
-    data['y'] = -numpy.sin(data['angle']) * data['distance']
+    x_direction = 1
+    if flip_left_right:
+        x_direction = -1
+
+    data['x'] = x_direction * numpy.cos(data['angle']) * data['distance']
+    data['y'] = numpy.sin(data['angle']) * data['distance']
+
+    set_zero_exact(data)
 
     return data[['x', 'y']]
+
+
+def set_zero_exact(data):
+    data.loc[(data['x'].abs() < 0.001), 'x'] = 0
+    data.loc[(data['y'].abs() < 0.001), 'y'] = 0
 
 
 def set_vertical_to_zero_angle(data):
@@ -65,30 +74,37 @@ def set_center_to_180_deg(data_polar):
     return data_polar
 
 
-def main():
-    step_size = 1
+def to_fusion_csv(data_cartesian, file_path_out):
+    data_cartesian['z'] = 0.0
+    data_cartesian *= 0.1
+    data_cartesian.to_csv(file_path_out, header=False, index=False)
 
-    spand_dir = 'spand_measurements_test_1'
+
+def cut_long_distances(data_polar):
+    max_distance = 2000
+    data_polar = data_polar.loc[data_polar['distance'] < max_distance]
+    return data_polar
+
+
+def main():
+    step_size = 5
+
+    spand_dir = 'spand_measurements'
     for file in os.listdir(spand_dir):
         file_path_in = os.path.join(spand_dir, file)
-        file_path_out = os.path.join(spand_dir + '_cartesian', file.replace('.csv', '_cartesian.csv'))
+        file_path_out = os.path.join(
+            spand_dir + '_cartesian', file.replace('.csv', '_cartesian.csv'))
 
         data_polar = read_raw_scan_file(file_path_in)
-        data_polar = set_center_to_180_deg(data_polar)
-
-        max_distance = 1800
-        data_polar = data_polar.loc[data_polar['distance'] < max_distance]
-
-        data_polar = interpolate(data_polar, step_size)
-
+        data_polar = cut_long_distances(data_polar)
+        data_polar_start = data_polar.iloc[:30]
+        data_polar_end = data_polar.iloc[-30:]
+        data_polar_to_interploate = data_polar.iloc[30:-30]
+        data_polar_to_interploate = interpolate(data_polar_to_interploate, step_size)
+        data_polar = pandas.concat([data_polar_start, data_polar_to_interploate, data_polar_end])
         data_cartesian = convert_from_polar_to_cartesian(data_polar)
-        data_cartesian['z'] = 0.0
 
-        data_cartesian.loc[(data_cartesian['x'].abs() < 0.001), 'x'] = 0
-        data_cartesian.loc[(data_cartesian['y'].abs() < 0.001), 'y'] = 0
-
-        data_cartesian *= 0.1
-        data_cartesian.to_csv(file_path_out, header=False, index=False)
+        to_fusion_csv(data_cartesian, file_path_out)
 
 
 if __name__ == '__main__':
